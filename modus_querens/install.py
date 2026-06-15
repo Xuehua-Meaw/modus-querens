@@ -58,6 +58,13 @@ def copy_skill(source: Path, dest: Path) -> None:
             shutil.copy2(src, target)
 
 
+def remove_skill(dest: Path) -> bool:
+    if not dest.exists():
+        return False
+    shutil.rmtree(dest)
+    return True
+
+
 def destinations(agent: str, global_install: bool, cwd: Path) -> list[Path]:
     spec = AGENTS[agent]
     primary_base = spec["global"] if global_install else cwd / spec["project"]
@@ -94,7 +101,7 @@ def normalize_agents(raw: list[str]) -> list[str]:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="modus-querens",
-        description="Install Modus Querens for specific coding agents (not all platforms).",
+        description="Install or remove Modus Querens for specific coding agents.",
     )
     p.add_argument(
         "-a",
@@ -109,7 +116,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--global",
         dest="global_install",
         action="store_true",
-        help="Install to user home",
+        help="Use user home skill dirs (default: current project)",
+    )
+    p.add_argument(
+        "-u",
+        "--uninstall",
+        action="store_true",
+        help="Remove installed skill folders (not .modus-querens/ run data)",
     )
     p.add_argument("-y", "--yes", action="store_true", help="Apply without extra prompt")
     return p
@@ -126,12 +139,20 @@ def main(argv: list[str] | None = None) -> int:
         for dest in destinations(agent, args.global_install, cwd):
             plan.append((spec["label"], dest))
 
-    print("Modus Querens install plan:")
+    print(f"Modus Querens {'uninstall' if args.uninstall else 'install'} plan:")
     for label, dest in plan:
         print(f"  • {label} → {dest}")
 
     if not args.yes:
         print("\nRe-run with -y to apply.", file=sys.stderr)
+        return 0
+
+    if args.uninstall:
+        for _, dest in plan:
+            if remove_skill(dest):
+                print(f"Removed → {dest}")
+            else:
+                print(f"Skipped (not found) → {dest}")
         return 0
 
     for _, dest in plan:

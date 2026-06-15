@@ -2,7 +2,7 @@
 /**
  * Install modus-querens into agent-specific skill folders only (never --all).
  */
-import { cpSync, existsSync, mkdirSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -41,11 +41,11 @@ const SKILL_FILES = [
 ];
 
 function usage() {
-  console.log(`modus-querens — install the skill for specific coding agents
+  console.log(`modus-querens — install or remove the skill for specific coding agents
 
 Usage:
   npx modus-querens --agent <agent> [--agent <agent> ...] [options]
-  node bin/modus-querens.mjs --agent cursor --global
+  npx modus-querens --uninstall --agent cursor --global -y
 
 Agents (pick one or more; required):
   cursor        Cursor (.cursor/skills/ + .agents/skills/)
@@ -54,14 +54,16 @@ Agents (pick one or more; required):
 
 Options:
   -a, --agent <name>   Target agent (repeatable)
-  -g, --global         Install to user home (default: current project)
+  -g, --global         User home skill dirs (default: current project)
+  -u, --uninstall      Remove installed skill folders (not .modus-querens/ run data)
   -y, --yes            Skip confirmation
-  --copy               Copy files (default). Symlinks are not used here.
+  --copy               Copy files on install (default). Symlinks are not used here.
   -h, --help           Show this help
 
 Examples:
   npx modus-querens --agent cursor --global -y
-  npx modus-querens --agent claude-code --global -y
+  npx modus-querens --uninstall --agent cursor --global -y
+  npx modus-querens --uninstall --agent claude-code --agent codex --global -y
 `);
 }
 
@@ -69,12 +71,17 @@ function parseArgs(argv) {
   const agents = [];
   let global = false;
   let yes = false;
+  let uninstall = false;
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "-h" || arg === "--help") return { help: true };
     if (arg === "-g" || arg === "--global") {
       global = true;
+      continue;
+    }
+    if (arg === "-u" || arg === "--uninstall") {
+      uninstall = true;
       continue;
     }
     if (arg === "-y" || arg === "--yes") {
@@ -95,7 +102,7 @@ function parseArgs(argv) {
     throw new Error(`Unknown argument: ${arg}`);
   }
 
-  return { agents, global, yes };
+  return { agents, global, yes, uninstall };
 }
 
 function copySkill(sourceRoot, destRoot) {
@@ -108,6 +115,14 @@ function copySkill(sourceRoot, destRoot) {
     }
     cpSync(src, dest, { recursive: true, force: true });
   }
+}
+
+function removeSkill(destRoot) {
+  if (!existsSync(destRoot)) {
+    return false;
+  }
+  rmSync(destRoot, { recursive: true, force: true });
+  return true;
 }
 
 function skillSourceRoot() {
@@ -172,7 +187,8 @@ async function main() {
     }
   }
 
-  console.log("Modus Querens install plan:");
+  const action = parsed.uninstall ? "uninstall" : "install";
+  console.log(`Modus Querens ${action} plan:`);
   for (const row of installs) {
     console.log(`  • ${row.label} → ${row.dest}`);
   }
@@ -180,6 +196,17 @@ async function main() {
   if (!parsed.yes && process.stdin.isTTY) {
     console.log("\nRe-run with -y to apply.");
     process.exit(0);
+  }
+
+  if (parsed.uninstall) {
+    for (const row of installs) {
+      if (removeSkill(row.dest)) {
+        console.log(`Removed → ${row.dest}`);
+      } else {
+        console.log(`Skipped (not found) → ${row.dest}`);
+      }
+    }
+    return;
   }
 
   for (const row of installs) {

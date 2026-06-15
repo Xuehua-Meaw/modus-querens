@@ -14,6 +14,14 @@ npx modus-querens --agent codex --global -y
 
 Use `--global` for all projects; omit it to install in the current repo only. Restart your agent after installing.
 
+## Uninstall
+
+```bash
+npx modus-querens --uninstall --agent cursor --global -y
+```
+
+Same `--agent` and `--global` flags as install. Removes only the skill folders the installer copied (e.g. `~/.cursor/skills/modus-querens/`). It does **not** delete `.modus-querens/` indexes or run logs next to your notes.
+
 ## Usage
 
 1. Point the agent at a folder of notes or docs.
