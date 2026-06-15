@@ -1,6 +1,6 @@
 [project]
 name = "modus-querens"
-version = "0.1.31"
+version = "0.1.32"
 description = "Install the Modus Querens agent skill for Cursor, Claude Code, and Codex"
 readme = "README.md"
 license = "MIT"

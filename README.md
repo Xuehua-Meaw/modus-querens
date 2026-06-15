@@ -18,7 +18,7 @@ npx modus-querens install -g codex
 | This repo | *(default)* | `.cursor/skills/`, `.claude/skills/`, `.agents/skills/` |
 | All your projects | `-g` | `~/.cursor/skills/`, `~/.claude/skills/`, `~/.agents/skills/` |
 
-Run without agent names to pick from a list. `install -g` with no names updates agents already installed globally; if none exist yet, you pick which to add.
+Run without agent names to pick from an interactive list (↑↓ move, Space toggle, Enter confirm). `install -g` with no names updates agents already installed globally; if none exist yet, you pick which to add.
 
 Restart your agent after installing.
 

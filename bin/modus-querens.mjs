@@ -3,7 +3,7 @@
  * Install or remove modus-querens in agent-specific skill folders.
  */
 import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
-import { createInterface } from "node:readline/promises";
+import { createInterface } from "node:readline";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -38,11 +38,18 @@ const LEGACY_DESTS = {
     (global, cwd) =>
       join(
         global ? homedir() : cwd,
-        global ? ".agents/skills" : ".agents/skills",
+        ".agents/skills",
         SKILL_NAME,
       ),
   ],
-  codex: [(global) => join(homedir(), ".codex", "skills", SKILL_NAME)],
+  codex: [
+    (global, cwd) =>
+      join(
+        global ? homedir() : cwd,
+        ".codex/skills",
+        SKILL_NAME,
+      ),
+  ],
 };
 
 const SKILL_FILES = [
@@ -64,7 +71,7 @@ Scope:
   -g, --global   Your user home — ~/.cursor/skills, ~/.claude/skills, ~/.agents/skills
 
 Behavior:
-  install              Pick agents interactively (or pass names)
+  install              Pick agents with arrow keys + Space, Enter to confirm
   install -g           Update global installs that already exist; if none, pick agents
   uninstall            Remove from all agents in the current project
   uninstall -g         Remove from all agents in your user home
@@ -96,6 +103,10 @@ function allDestinations(agent, global, cwd) {
   const primary = destination(agent, global, cwd);
   const legacy = legacyDestinations(agent, global, cwd);
   return [...new Set([primary, ...legacy])];
+}
+
+function isInstalled(agent, global, cwd) {
+  return allDestinations(agent, global, cwd).some((path) => existsSync(path));
 }
 
 function normalizeAgent(raw) {
@@ -160,47 +171,90 @@ function scopeLabel(global) {
 function agentLine(agent, global, cwd) {
   const spec = AGENTS[agent];
   const rel = global ? `~/${spec.globalRel}` : spec.projectRel;
-  const installed = existsSync(destination(agent, global, cwd));
-  const mark = installed ? "installed" : "not installed";
+  const mark = isInstalled(agent, global, cwd) ? "installed" : "not installed";
   return `${spec.label.padEnd(12)} ${rel}/${SKILL_NAME}  (${mark})`;
 }
 
-async function pickAgents(global, cwd) {
-  console.log(`\nPick agents for ${scopeLabel(global)}:\n`);
+function renderPicker(global, cwd, cursor, selected) {
+  const lines = [
+    `\nPick agents for ${scopeLabel(global)}:`,
+    "  Up/Down move · Space toggle · Enter confirm · q quit\n",
+  ];
   AGENT_ORDER.forEach((agent, index) => {
-    console.log(`  ${index + 1}. ${agentLine(agent, global, cwd)}`);
+    const pointer = index === cursor ? ">" : " ";
+    const box = selected[index] ? "[x]" : "[ ]";
+    lines.push(` ${pointer} ${box} ${agentLine(agent, global, cwd)}`);
   });
-  console.log('\nEnter numbers (e.g. 1 3), "all", or q to cancel:');
+  return lines.join("\n");
+}
 
+function pickAgents(global, cwd) {
   if (!input.isTTY) {
     throw new Error(
       "Non-interactive shell: pass agent names, e.g. npx modus-querens install cursor codex",
     );
   }
 
-  const rl = createInterface({ input, output });
-  try {
-    const answer = (await rl.question("> ")).trim().toLowerCase();
-    if (!answer || answer === "q") return [];
-    if (answer === "all") return [...AGENT_ORDER];
-    const picks = answer
-      .split(/[\s,]+/)
-      .map((part) => Number.parseInt(part, 10))
-      .filter((n) => Number.isInteger(n) && n >= 1 && n <= AGENT_ORDER.length);
-    if (!picks.length) throw new Error("No valid selection.");
-    return [...new Set(picks.map((n) => AGENT_ORDER[n - 1]))];
-  } finally {
-    rl.close();
-  }
+  return new Promise((resolve) => {
+    const rl = createInterface({ input, output });
+    let cursor = 0;
+    const selected = AGENT_ORDER.map((agent) => isInstalled(agent, global, cwd));
+
+    const refresh = () => {
+      output.write("\x1B[?25l");
+      output.write("\x1B[2J\x1B[H");
+      output.write(renderPicker(global, cwd, cursor, selected));
+    };
+
+    const cleanup = (result) => {
+      input.setRawMode(false);
+      input.removeListener("keypress", onKeypress);
+      rl.close();
+      output.write("\x1B[?25h\n");
+      resolve(result);
+    };
+
+    const onKeypress = (_str, key) => {
+      if (!key) return;
+      if (key.ctrl && key.name === "c") {
+        cleanup([]);
+        return;
+      }
+      if (key.name === "up") {
+        cursor = (cursor - AGENT_ORDER.length + 1) % AGENT_ORDER.length;
+        refresh();
+        return;
+      }
+      if (key.name === "down") {
+        cursor = (cursor + 1) % AGENT_ORDER.length;
+        refresh();
+        return;
+      }
+      if (key.name === "space") {
+        selected[cursor] = !selected[cursor];
+        refresh();
+        return;
+      }
+      if (key.name === "return") {
+        cleanup(AGENT_ORDER.filter((_, index) => selected[index]));
+        return;
+      }
+      if (key.sequence === "q" || key.sequence === "Q") {
+        cleanup([]);
+      }
+    };
+
+    input.setRawMode(true);
+    input.on("keypress", onKeypress);
+    refresh();
+  });
 }
 
 async function resolveAgentsForInstall(parsed, cwd) {
   if (parsed.agents.length) return parsed.agents;
 
   if (parsed.global) {
-    const existing = AGENT_ORDER.filter((agent) =>
-      existsSync(destination(agent, true, cwd)),
-    );
+    const existing = AGENT_ORDER.filter((agent) => isInstalled(agent, true, cwd));
     if (existing.length) return existing;
   }
 
@@ -234,15 +288,24 @@ async function runUninstall(parsed, cwd) {
   const agents = resolveAgentsForUninstall(parsed);
   console.log(`\nRemoving from ${scopeLabel(parsed.global)}:`);
 
+  const removedPaths = new Set();
+
   for (const agent of agents) {
     const paths = allDestinations(agent, parsed.global, cwd);
     let removedAny = false;
+
     for (const path of paths) {
+      if (removedPaths.has(path)) {
+        removedAny = true;
+        continue;
+      }
       if (removePath(path)) {
+        removedPaths.add(path);
         console.log(`  removed ${path}`);
         removedAny = true;
       }
     }
+
     if (!removedAny) {
       console.log(`  - ${AGENTS[agent].label} — not found`);
     }

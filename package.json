@@ -1,6 +1,6 @@
 {
   "name": "modus-querens",
-  "version": "0.1.31",
+  "version": "0.1.32",
   "description": "Agent skill: reason over your notes/knowledge base without vector RAG",
   "license": "MIT",
   "author": "Xuehua-Meaw",
@@ -26,6 +26,10 @@
     "url": "git+https://github.com/Xuehua-Meaw/modus-querens.git"
   },
   "scripts": {
-    "install-skill": "node bin/modus-querens.mjs"
+    "install-skill": "node bin/modus-querens.mjs",
+    "version:patch": "node scripts/bump-version.mjs patch",
+    "version:minor": "node scripts/bump-version.mjs minor",
+    "version:major": "node scripts/bump-version.mjs major",
+    "version:set": "node scripts/bump-version.mjs"
   }
 }

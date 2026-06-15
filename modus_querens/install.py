@@ -4,6 +4,8 @@ from __future__ import annotations
 import argparse
 import shutil
 import sys
+import termios
+import tty
 from pathlib import Path
 
 SKILL_NAME = "modus-querens"
@@ -47,11 +49,11 @@ def destination(agent: str, global_install: bool, cwd: Path) -> Path:
 
 def legacy_destinations(agent: str, global_install: bool, cwd: Path) -> list[Path]:
     paths: list[Path] = []
+    base = Path.home() if global_install else cwd
     if agent == "cursor":
-        base = Path.home() if global_install else cwd
         paths.append(base / ".agents/skills" / SKILL_NAME)
-    if agent == "codex" and global_install:
-        paths.append(Path.home() / ".codex/skills" / SKILL_NAME)
+    if agent == "codex":
+        paths.append(base / ".codex/skills" / SKILL_NAME)
     return paths
 
 
@@ -64,6 +66,10 @@ def all_destinations(agent: str, global_install: bool, cwd: Path) -> list[Path]:
             seen.add(path)
             out.append(path)
     return out
+
+
+def is_installed(agent: str, global_install: bool, cwd: Path) -> bool:
+    return any(path.exists() for path in all_destinations(agent, global_install, cwd))
 
 
 def normalize_agent(raw: str) -> str:
@@ -108,44 +114,113 @@ def scope_label(global_install: bool) -> str:
 def agent_line(agent: str, global_install: bool, cwd: Path) -> str:
     spec = AGENTS[agent]
     rel = f"~/{spec['global_rel']}" if global_install else str(spec["project_rel"])
-    installed = "installed" if destination(agent, global_install, cwd).exists() else "not installed"
+    installed = "installed" if is_installed(agent, global_install, cwd) else "not installed"
     return f"{spec['label']:<12} {rel}/{SKILL_NAME}  ({installed})"
 
 
-def pick_agents(global_install: bool, cwd: Path) -> list[str]:
-    print(f"\nPick agents for {scope_label(global_install)}:\n")
-    for index, agent in enumerate(AGENT_ORDER, start=1):
-        print(f"  {index}. {agent_line(agent, global_install, cwd)}")
-    print('\nEnter numbers (e.g. 1 3), "all", or q to cancel:')
+def _render_picker(global_install: bool, cwd: Path, cursor: int, selected: list[bool]) -> str:
+    lines = [
+        f"\nPick agents for {scope_label(global_install)}:",
+        "  Up/Down move · Space toggle · Enter confirm · q quit\n",
+    ]
+    for index, agent in enumerate(AGENT_ORDER):
+        pointer = ">" if index == cursor else " "
+        box = "[x]" if selected[index] else "[ ]"
+        lines.append(f" {pointer} {box} {agent_line(agent, global_install, cwd)}")
+    return "\n".join(lines)
 
+
+def _read_key_unix() -> str:
+    ch = sys.stdin.read(1)
+    if ch != "\x1b":
+        return ch
+    rest = sys.stdin.read(2)
+    if rest == "[A":
+        return "up"
+    if rest == "[B":
+        return "down"
+    return ch
+
+
+def pick_agents(global_install: bool, cwd: Path) -> list[str]:
     if not sys.stdin.isatty():
         raise SystemExit(
             "Non-interactive shell: pass agent names, e.g. modus-querens install cursor codex"
         )
 
-    answer = input("> ").strip().lower()
-    if not answer or answer == "q":
-        return []
-    if answer == "all":
-        return list(AGENT_ORDER)
+    if sys.platform == "win32":
+        return _pick_agents_windows(global_install, cwd)
 
-    picks: list[str] = []
-    for part in answer.replace(",", " ").split():
-        if not part.isdigit():
+    selected = [is_installed(agent, global_install, cwd) for agent in AGENT_ORDER]
+    cursor = 0
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        while True:
+            sys.stdout.write("\x1b[2J\x1b[H")
+            sys.stdout.write(_render_picker(global_install, cwd, cursor, selected))
+            sys.stdout.flush()
+            key = _read_key_unix()
+            if key == "up":
+                cursor = (cursor - len(AGENT_ORDER) + 1) % len(AGENT_ORDER)
+            elif key == "down":
+                cursor = (cursor + 1) % len(AGENT_ORDER)
+            elif key == " ":
+                selected[cursor] = not selected[cursor]
+            elif key in ("\r", "\n"):
+                break
+            elif key.lower() == "q":
+                return []
+            elif key == "\x03":
+                return []
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        sys.stdout.write("\n")
+
+    return [agent for agent, on in zip(AGENT_ORDER, selected, strict=True) if on]
+
+
+def _clear_screen() -> None:
+    sys.stdout.write("\x1b[2J\x1b[H")
+    sys.stdout.flush()
+
+
+def _pick_agents_windows(global_install: bool, cwd: Path) -> list[str]:
+    import msvcrt
+
+    selected = [is_installed(agent, global_install, cwd) for agent in AGENT_ORDER]
+    cursor = 0
+    while True:
+        _clear_screen()
+        sys.stdout.write(_render_picker(global_install, cwd, cursor, selected))
+        sys.stdout.flush()
+        key = msvcrt.getwch()
+        if key in ("\x00", "\xe0"):
+            arrow = msvcrt.getwch()
+            if arrow == "H":
+                cursor = (cursor - len(AGENT_ORDER) + 1) % len(AGENT_ORDER)
+            elif arrow == "P":
+                cursor = (cursor + 1) % len(AGENT_ORDER)
             continue
-        index = int(part)
-        if 1 <= index <= len(AGENT_ORDER):
-            picks.append(AGENT_ORDER[index - 1])
-    if not picks:
-        raise SystemExit("No valid selection.")
-    return list(dict.fromkeys(picks))
+        if key == " ":
+            selected[cursor] = not selected[cursor]
+        elif key in ("\r", "\n"):
+            break
+        elif key.lower() == "q":
+            return []
+        elif key == "\x03":
+            return []
+
+    sys.stdout.write("\n")
+    return [agent for agent, on in zip(AGENT_ORDER, selected, strict=True) if on]
 
 
 def resolve_agents_for_install(args: argparse.Namespace, cwd: Path) -> list[str]:
     if args.agents:
         return args.agents
     if args.global_install:
-        existing = [agent for agent in AGENT_ORDER if destination(agent, True, cwd).exists()]
+        existing = [agent for agent in AGENT_ORDER if is_installed(agent, True, cwd)]
         if existing:
             return existing
     return pick_agents(args.global_install, cwd)
@@ -176,10 +251,16 @@ def run_install(args: argparse.Namespace, cwd: Path) -> int:
 def run_uninstall(args: argparse.Namespace, cwd: Path) -> int:
     agents = resolve_agents_for_uninstall(args)
     print(f"\nRemoving from {scope_label(args.global_install)}:")
+    removed_paths: set[Path] = set()
+
     for agent in agents:
         removed_any = False
         for path in all_destinations(agent, args.global_install, cwd):
+            if path in removed_paths:
+                removed_any = True
+                continue
             if remove_path(path):
+                removed_paths.add(path)
                 print(f"  removed {path}")
                 removed_any = True
         if not removed_any:
