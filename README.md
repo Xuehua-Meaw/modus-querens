@@ -7,20 +7,32 @@ A skill for Cursor, Claude Code, and OpenAI Codex. Query your notes and docs by 
 ## Install
 
 ```bash
-npx modus-querens --agent cursor --global -y
-npx modus-querens --agent claude-code --global -y
-npx modus-querens --agent codex --global -y
+npx modus-querens install
+npx modus-querens install -g
+npx modus-querens install cursor claude-code
+npx modus-querens install -g codex
 ```
 
-Use `--global` for all projects; omit it to install in the current repo only. Restart your agent after installing.
+| Scope | Flag | Paths |
+|-------|------|-------|
+| This repo | *(default)* | `.cursor/skills/`, `.claude/skills/`, `.agents/skills/` |
+| All your projects | `-g` | `~/.cursor/skills/`, `~/.claude/skills/`, `~/.agents/skills/` |
+
+Run without agent names to pick from a list. `install -g` with no names updates agents already installed globally; if none exist yet, you pick which to add.
+
+Restart your agent after installing.
 
 ## Uninstall
 
 ```bash
-npx modus-querens --uninstall --agent cursor --global -y
+npx modus-querens uninstall
+npx modus-querens uninstall -g
+npx modus-querens uninstall cursor
 ```
 
-Same `--agent` and `--global` flags as install. Removes only the skill folders the installer copied (e.g. `~/.cursor/skills/modus-querens/`). It does **not** delete `.modus-querens/` indexes or run logs next to your notes.
+Uninstall with no agent names removes the skill from **all** agents in that scope. Legacy paths from older installs (e.g. `~/.codex/skills/`) are cleaned up too.
+
+Does **not** delete `.modus-querens/` indexes or run logs next to your notes.
 
 ## Usage
 

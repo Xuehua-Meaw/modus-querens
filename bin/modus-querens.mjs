@@ -1,36 +1,48 @@
 #!/usr/bin/env node
 /**
- * Install modus-querens into agent-specific skill folders only (never --all).
+ * Install or remove modus-querens in agent-specific skill folders.
  */
 import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { createInterface } from "node:readline/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { stdin as input, stdout as output } from "node:process";
 
 const SKILL_NAME = "modus-querens";
 
-/** Native paths each agent documents for skill discovery. */
+const AGENT_ORDER = ["cursor", "claude-code", "codex"];
+
+/** Canonical paths from each agent's docs (one folder per agent per scope). */
 const AGENTS = {
   cursor: {
     label: "Cursor",
-    project: ".cursor/skills",
-    global: join(homedir(), ".cursor", "skills"),
+    projectRel: ".cursor/skills",
+    globalRel: ".cursor/skills",
   },
   "claude-code": {
     label: "Claude Code",
-    project: ".claude/skills",
-    global: join(homedir(), ".claude", "skills"),
-  },
-  claude: {
-    label: "Claude Code",
-    project: ".claude/skills",
-    global: join(homedir(), ".claude", "skills"),
+    projectRel: ".claude/skills",
+    globalRel: ".claude/skills",
   },
   codex: {
-    label: "OpenAI Codex",
-    project: ".agents/skills",
-    global: join(homedir(), ".codex", "skills"),
+    label: "Codex",
+    projectRel: ".agents/skills",
+    globalRel: ".agents/skills",
   },
+};
+
+/** Older installs / cross-compat paths — removed on uninstall only. */
+const LEGACY_DESTS = {
+  cursor: [
+    (global, cwd) =>
+      join(
+        global ? homedir() : cwd,
+        global ? ".agents/skills" : ".agents/skills",
+        SKILL_NAME,
+      ),
+  ],
+  codex: [(global) => join(homedir(), ".codex", "skills", SKILL_NAME)],
 };
 
 const SKILL_FILES = [
@@ -41,68 +53,86 @@ const SKILL_FILES = [
 ];
 
 function usage() {
-  console.log(`modus-querens — install or remove the skill for specific coding agents
+  console.log(`modus-querens — install or remove this skill for coding agents
 
 Usage:
-  npx modus-querens --agent <agent> [--agent <agent> ...] [options]
-  npx modus-querens --uninstall --agent cursor --global -y
+  npx modus-querens install [-g] [cursor|claude-code|codex ...]
+  npx modus-querens uninstall [-g] [cursor|claude-code|codex ...]
 
-Agents (pick one or more; required):
-  cursor        Cursor (.cursor/skills/ + .agents/skills/)
-  claude-code   Claude Code (.claude/skills/)  alias: claude
-  codex         OpenAI Codex (.agents/skills/ project, ~/.codex/skills/ global)
+Scope:
+  (default)   Current project — .cursor/skills, .claude/skills, .agents/skills
+  -g, --global   Your user home — ~/.cursor/skills, ~/.claude/skills, ~/.agents/skills
 
-Options:
-  -a, --agent <name>   Target agent (repeatable)
-  -g, --global         User home skill dirs (default: current project)
-  -u, --uninstall      Remove installed skill folders (not .modus-querens/ run data)
-  -y, --yes            Skip confirmation
-  --copy               Copy files on install (default). Symlinks are not used here.
-  -h, --help           Show this help
+Behavior:
+  install              Pick agents interactively (or pass names)
+  install -g           Update global installs that already exist; if none, pick agents
+  uninstall            Remove from all agents in the current project
+  uninstall -g         Remove from all agents in your user home
+  uninstall cursor     Remove only from named agents
 
-Examples:
-  npx modus-querens --agent cursor --global -y
-  npx modus-querens --uninstall --agent cursor --global -y
-  npx modus-querens --uninstall --agent claude-code --agent codex --global -y
+Does not delete .modus-querens/ indexes or run logs next to your notes.
 `);
 }
 
-function parseArgs(argv) {
-  const agents = [];
-  let global = false;
-  let yes = false;
-  let uninstall = false;
+function skillSourceRoot() {
+  const here = dirname(fileURLToPath(import.meta.url));
+  return resolve(here, "..", "skills", SKILL_NAME);
+}
 
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i];
+function destination(agent, global, cwd) {
+  const spec = AGENTS[agent];
+  const base = global
+    ? join(homedir(), spec.globalRel)
+    : join(cwd, spec.projectRel);
+  return join(base, SKILL_NAME);
+}
+
+function legacyDestinations(agent, global, cwd) {
+  const makers = LEGACY_DESTS[agent] ?? [];
+  return makers.map((make) => make(global, cwd));
+}
+
+function allDestinations(agent, global, cwd) {
+  const primary = destination(agent, global, cwd);
+  const legacy = legacyDestinations(agent, global, cwd);
+  return [...new Set([primary, ...legacy])];
+}
+
+function normalizeAgent(raw) {
+  const key = raw.toLowerCase();
+  if (key === "claude") return "claude-code";
+  if (!AGENTS[key]) {
+    throw new Error(
+      `Unknown agent "${raw}". Use: ${AGENT_ORDER.join(", ")}`,
+    );
+  }
+  return key;
+}
+
+function parseArgs(argv) {
+  let command = null;
+  let global = false;
+  const agents = [];
+
+  for (const arg of argv) {
     if (arg === "-h" || arg === "--help") return { help: true };
     if (arg === "-g" || arg === "--global") {
       global = true;
       continue;
     }
-    if (arg === "-u" || arg === "--uninstall") {
-      uninstall = true;
+    if (arg === "install" || arg === "uninstall") {
+      if (command) throw new Error(`Duplicate command: ${arg}`);
+      command = arg;
       continue;
     }
-    if (arg === "-y" || arg === "--yes") {
-      yes = true;
-      continue;
+    if (arg.startsWith("-")) {
+      throw new Error(`Unknown option: ${arg}`);
     }
-    if (arg === "--copy") continue;
-    if (arg === "-a" || arg === "--agent") {
-      const next = argv[++i];
-      if (!next) throw new Error("Missing value for --agent");
-      agents.push(next.toLowerCase());
-      continue;
-    }
-    if (arg.startsWith("--agent=")) {
-      agents.push(arg.slice("--agent=".length).toLowerCase());
-      continue;
-    }
-    throw new Error(`Unknown argument: ${arg}`);
+    agents.push(normalizeAgent(arg));
   }
 
-  return { agents, global, yes, uninstall };
+  if (!command) command = "install";
+  return { command, global, agents: [...new Set(agents)] };
 }
 
 function copySkill(sourceRoot, destRoot) {
@@ -117,50 +147,106 @@ function copySkill(sourceRoot, destRoot) {
   }
 }
 
-function removeSkill(destRoot) {
-  if (!existsSync(destRoot)) {
-    return false;
-  }
-  rmSync(destRoot, { recursive: true, force: true });
+function removePath(path) {
+  if (!existsSync(path)) return false;
+  rmSync(path, { recursive: true, force: true });
   return true;
 }
 
-function skillSourceRoot() {
-  const here = dirname(fileURLToPath(import.meta.url));
-  return resolve(here, "..", "skills", SKILL_NAME);
+function scopeLabel(global) {
+  return global ? "user home (global)" : "this project";
 }
 
-function destinations(agent, global, cwd) {
+function agentLine(agent, global, cwd) {
   const spec = AGENTS[agent];
-  const primaryBase = global ? spec.global : join(cwd, spec.project);
-  const dests = [join(primaryBase, SKILL_NAME)];
-
-  if (agent === "cursor") {
-    const agentsBase = global
-      ? join(homedir(), ".agents", "skills")
-      : join(cwd, ".agents", "skills");
-    const alt = join(agentsBase, SKILL_NAME);
-    if (alt !== dests[0]) dests.push(alt);
-  }
-
-  return dests;
+  const rel = global ? `~/${spec.globalRel}` : spec.projectRel;
+  const installed = existsSync(destination(agent, global, cwd));
+  const mark = installed ? "installed" : "not installed";
+  return `${spec.label.padEnd(12)} ${rel}/${SKILL_NAME}  (${mark})`;
 }
 
-function normalizeAgents(list) {
-  const out = [];
-  const seen = new Set();
-  for (const raw of list) {
-    const key = raw === "claude" ? "claude-code" : raw;
-    if (!AGENTS[key]) {
-      throw new Error(
-        `Unknown agent "${raw}". Use: ${Object.keys(AGENTS).filter((k) => k !== "claude").join(", ")}`,
-      );
-    }
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(key);
+async function pickAgents(global, cwd) {
+  console.log(`\nPick agents for ${scopeLabel(global)}:\n`);
+  AGENT_ORDER.forEach((agent, index) => {
+    console.log(`  ${index + 1}. ${agentLine(agent, global, cwd)}`);
+  });
+  console.log('\nEnter numbers (e.g. 1 3), "all", or q to cancel:');
+
+  if (!input.isTTY) {
+    throw new Error(
+      "Non-interactive shell: pass agent names, e.g. npx modus-querens install cursor codex",
+    );
   }
-  return out;
+
+  const rl = createInterface({ input, output });
+  try {
+    const answer = (await rl.question("> ")).trim().toLowerCase();
+    if (!answer || answer === "q") return [];
+    if (answer === "all") return [...AGENT_ORDER];
+    const picks = answer
+      .split(/[\s,]+/)
+      .map((part) => Number.parseInt(part, 10))
+      .filter((n) => Number.isInteger(n) && n >= 1 && n <= AGENT_ORDER.length);
+    if (!picks.length) throw new Error("No valid selection.");
+    return [...new Set(picks.map((n) => AGENT_ORDER[n - 1]))];
+  } finally {
+    rl.close();
+  }
+}
+
+async function resolveAgentsForInstall(parsed, cwd) {
+  if (parsed.agents.length) return parsed.agents;
+
+  if (parsed.global) {
+    const existing = AGENT_ORDER.filter((agent) =>
+      existsSync(destination(agent, true, cwd)),
+    );
+    if (existing.length) return existing;
+  }
+
+  return pickAgents(parsed.global, cwd);
+}
+
+function resolveAgentsForUninstall(parsed) {
+  if (parsed.agents.length) return parsed.agents;
+  return [...AGENT_ORDER];
+}
+
+async function runInstall(parsed, cwd) {
+  const agents = await resolveAgentsForInstall(parsed, cwd);
+  if (!agents.length) {
+    console.log("Nothing selected.");
+    return;
+  }
+
+  const sourceRoot = skillSourceRoot();
+  console.log(`\nInstalling to ${scopeLabel(parsed.global)}:`);
+
+  for (const agent of agents) {
+    const dest = destination(agent, parsed.global, cwd);
+    mkdirSync(dirname(dest), { recursive: true });
+    copySkill(sourceRoot, dest);
+    console.log(`  installed ${AGENTS[agent].label} → ${dest}`);
+  }
+}
+
+async function runUninstall(parsed, cwd) {
+  const agents = resolveAgentsForUninstall(parsed);
+  console.log(`\nRemoving from ${scopeLabel(parsed.global)}:`);
+
+  for (const agent of agents) {
+    const paths = allDestinations(agent, parsed.global, cwd);
+    let removedAny = false;
+    for (const path of paths) {
+      if (removePath(path)) {
+        console.log(`  removed ${path}`);
+        removedAny = true;
+      }
+    }
+    if (!removedAny) {
+      console.log(`  - ${AGENTS[agent].label} — not found`);
+    }
+  }
 }
 
 async function main() {
@@ -170,50 +256,19 @@ async function main() {
     return;
   }
 
-  if (!parsed.agents?.length) {
-    console.error("Error: pass at least one --agent (cursor, claude-code, codex).\n");
-    usage();
-    process.exit(1);
-  }
-
-  const agents = normalizeAgents(parsed.agents);
-  const sourceRoot = skillSourceRoot();
   const cwd = process.cwd();
-  const installs = [];
-  for (const agent of agents) {
-    const spec = AGENTS[agent];
-    for (const dest of destinations(agent, parsed.global, cwd)) {
-      installs.push({ agent, label: spec.label, dest });
-    }
-  }
 
-  const action = parsed.uninstall ? "uninstall" : "install";
-  console.log(`Modus Querens ${action} plan:`);
-  for (const row of installs) {
-    console.log(`  • ${row.label} → ${row.dest}`);
-  }
-
-  if (!parsed.yes && process.stdin.isTTY) {
-    console.log("\nRe-run with -y to apply.");
-    process.exit(0);
-  }
-
-  if (parsed.uninstall) {
-    for (const row of installs) {
-      if (removeSkill(row.dest)) {
-        console.log(`Removed → ${row.dest}`);
-      } else {
-        console.log(`Skipped (not found) → ${row.dest}`);
-      }
-    }
+  if (parsed.command === "uninstall") {
+    await runUninstall(parsed, cwd);
     return;
   }
 
-  for (const row of installs) {
-    mkdirSync(dirname(row.dest), { recursive: true });
-    copySkill(sourceRoot, row.dest);
-    console.log(`Installed → ${row.dest}`);
+  if (parsed.command === "install") {
+    await runInstall(parsed, cwd);
+    return;
   }
+
+  throw new Error(`Unknown command: ${parsed.command}`);
 }
 
 main().catch((err) => {

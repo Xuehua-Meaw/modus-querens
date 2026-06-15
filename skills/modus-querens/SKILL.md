@@ -13,7 +13,7 @@ license: MIT
 compatibility: Cursor, Claude Code, OpenAI Codex; Python 3.10+ optional for scripts/build_tree.py (stdlib only)
 metadata:
   author: Xuehua-Meaw
-  version: "0.1.1"
+  version: "0.1.31"
 ---
 
 # Modus Querens
