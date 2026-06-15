@@ -1,0 +1,22 @@
+# Local agent installs / corpus artifacts
+.modus-querens/
+.agents/
+.cursor/
+.claude/
+
+# Node / Python packaging
+node_modules/
+dist/
+*.egg-info/
+.venv/
+uv.lock
+__pycache__/
+*.py[cod]
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/

@@ -1,0 +1,31 @@
+{
+  "name": "modus-querens",
+  "version": "0.1.1",
+  "description": "Agent skill: reason over your notes/knowledge base without vector RAG",
+  "license": "MIT",
+  "author": "Xuehua-Meaw",
+  "type": "module",
+  "bin": {
+    "modus-querens": "bin/modus-querens.mjs"
+  },
+  "files": [
+    "bin/modus-querens.mjs",
+    "skills/modus-querens",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "cursor",
+    "claude-code",
+    "codex",
+    "skill",
+    "knowledge-base"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Xuehua-Meaw/modus-querens.git"
+  },
+  "scripts": {
+    "install-skill": "node bin/modus-querens.mjs"
+  }
+}
