@@ -66,6 +66,9 @@ dropping conditions is the most damaging failure this skill can make.
 - Re-drafting the answer in many passes when one synthesis pass is enough.
 - Emitting per-claim evidence-trail tables, completion markers, or trace JSON.
 - Re-reading, as the main agent, everything the sub-agents already read.
+- **Dispatching Investigate sub-agents in read-only / Ask mode** — audit files
+  will not be written; Synthesize loses provenance. Use `readonly: false` (Cursor
+  Task) and verify `investigations/*.md` exist before merging.
 - Answering a comparison from a single source.
 - Pasting full document text into the tree index.
 - Dropping a condition to make a claim look cleaner.
@@ -76,6 +79,8 @@ dropping conditions is the most damaging failure this skill can make.
 .modus-querens/
 ├── index/
 │   ├── _catalog.json
+│   ├── _bm25_meta.json   # optional BM25 manifest
+│   ├── _bm25.pkl         # optional BM25 index
 │   ├── _links.json       # optional cross-doc links
 │   └── <doc-slug>.json
 └── runs/

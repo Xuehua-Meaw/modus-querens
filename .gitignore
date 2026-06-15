@@ -12,6 +12,11 @@ dist/
 uv.lock
 __pycache__/
 *.py[cod]
+.pytest_cache/
+
+# Temp / scratch (local dev)
+.tmp-*
+*.tmp
 
 # OS / editor
 .DS_Store

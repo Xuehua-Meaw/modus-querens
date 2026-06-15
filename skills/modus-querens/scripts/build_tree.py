@@ -21,6 +21,8 @@ import json
 import re
 from pathlib import Path
 
+from corpus_utils import iter_corpus_files, read_corpus_lines, resolve_corpus, safe_rel_path
+
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
 
@@ -121,19 +123,19 @@ def main() -> int:
     ap.add_argument("--ext", default=".md,.markdown,.txt")
     args = ap.parse_args()
 
-    corpus = Path(args.corpus_dir).resolve()
+    corpus = resolve_corpus(args.corpus_dir)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     exts = {e if e.startswith(".") else f".{e}" for e in args.ext.split(",")}
 
     catalog: list[dict] = []
-    files = sorted(p for p in corpus.rglob("*") if p.is_file() and p.suffix.lower() in exts)
+    files = iter_corpus_files(corpus, exts)
     for path in files:
         try:
-            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-        except OSError:
+            lines = read_corpus_lines(path)
+        except (OSError, UnicodeDecodeError):
             continue
-        rel = path.relative_to(corpus)
+        rel = Path(safe_rel_path(path, corpus))
         slug = slugify(str(rel.with_suffix("")))
         doc_type = "markdown" if path.suffix.lower() in {".md", ".markdown"} else "text"
         structure = build_structure(lines, path.stem)

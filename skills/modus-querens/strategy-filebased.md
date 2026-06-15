@@ -17,7 +17,9 @@ Two ways to build it:
 - **Deterministic:** run the helper for Markdown/text:
   ```bash
   python scripts/build_tree.py <corpus_dir> --out .modus-querens/index
+  python scripts/build_bm25.py <corpus_dir> --index .modus-querens/index --rebuild-trees
   ```
+  BM25 needs `pip install rank-bm25` (optional; tree-only works without it).
 - **Agent-authored:** read each doc and write the tree yourself; fill `summary`
   only for load-bearing nodes.
 
@@ -53,6 +55,9 @@ Keep **only structure + summaries** in the tree. Read source files at query time
 ```
 A. DOC SELECT — read _catalog.json; pick relevant docs by description.
 
+A'. BM25 RECALL (optional) — search_bm25.py or read _bm25_meta.json + top sections.
+    Hits are candidates only; confirm by reading the section.
+
 B. TREE SEARCH — read structure.json; reason which node_ids hold the answer.
 
 C. FETCH — read only each node's source range (whole sections, not fragments).
@@ -67,21 +72,40 @@ D. ANSWER — synthesize from fetched text; cite (doc_path §title). Widen once,
 | --- | --- |
 | List docs | `Read .modus-querens/index/_catalog.json` |
 | Read tree | `Read .modus-querens/index/<doc-slug>.json` |
+| BM25 recall | `python scripts/search_bm25.py "<probe>" --index .modus-querens/index` |
 | Read source | `Read(doc_path, offset, limit)` / `Grep` |
 
 `Glob` discovers new files; `Grep` confirms a term appears where the tree implied.
 
-## 4. Optional recall (Cursor and similar hosts)
+## 4. Optional recall
 
-When the harness offers codebase or semantic search, use it only during **Map** to
-spot candidates before or alongside tree search. Hits are candidates, not
-answers — always read the section range.
+**BM25 (lexical, not vector):** section-level index at `_bm25_meta.json` +
+`_bm25.pkl`. Built by `build_bm25.py` with `rank-bm25`. Tokenizer `mq_v2`
+covers CJK, Japanese kana, Korean, Thai, Cyrillic, Arabic, Devanagari, Greek,
+Hebrew, and Latin (NFKC-normalized). Same discipline as tree search — candidates
+only; always read the section range. Rebuild after upgrading tokenizer version.
+
+**Host search (Cursor and similar):** codebase or semantic search during **Map**
+when it helps. Hits are candidates, not answers — always read the section range.
 
 ## 5. With sub-agents
 
-Give each investigation sub-agent the probe, corpus root, index path, and run
-folder. It runs steps B–C, returns a tight summary, and writes
-`<run>/investigations/<probe-slug>.md`.
+Give each investigation sub-agent the probe, corpus root, index path, run folder,
+and the **exact output path** for its audit note. It runs steps B–C, returns a
+tight summary, and **writes** `<run>/investigations/<probe-slug>.md`.
+
+### Cursor enforcement
+
+When using the **Task** tool for Investigate:
+
+- Set **`readonly: false`** — never `readonly: true`.
+- Put the full audit file path in the prompt; require the sub-agent to confirm
+  the write before finishing.
+- Parent agent: **verify** all `investigations/*.md` exist before Synthesize.
+  If a sub-agent only returned chat text (Ask/read-only mode), the parent must
+  write the file or re-dispatch with write access.
+
+Read-only sub-agents are OK for **Map** scouting only, not for Investigate.
 
 ## Example
 

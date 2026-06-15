@@ -38,7 +38,12 @@ Does **not** delete `.modus-querens/` indexes or run logs next to your notes.
 
 1. Point the agent at a folder of notes or docs.
 2. Ask something like *"Ask my notes how X connects to Y"* or *"Query my knowledge base about …"*.
-3. Optional index: `python skills/modus-querens/scripts/build_tree.py <corpus> --out .modus-querens/index`
+3. Optional index:
+   ```bash
+   python skills/modus-querens/scripts/build_tree.py <corpus> --out .modus-querens/index
+   pip install rank-bm25
+   python skills/modus-querens/scripts/build_bm25.py <corpus> --index .modus-querens/index --rebuild-trees
+   ```
 
 Runs and indexes are written under `.modus-querens/` next to your corpus.
 

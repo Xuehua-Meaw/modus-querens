@@ -10,10 +10,10 @@ description: >-
   notes/knowledge base", or mentions vectorless / reasoning-based / file-based
   retrieval over a personal corpus.
 license: MIT
-compatibility: Cursor, Claude Code, OpenAI Codex; Python 3.10+ optional for scripts/build_tree.py (stdlib only)
+compatibility: Cursor, Claude Code, OpenAI Codex; Python 3.10+ optional for scripts (build_tree.py stdlib; build_bm25.py needs rank-bm25)
 metadata:
   author: Xuehua-Meaw
-  version: "0.1.32"
+  version: "0.1.34"
 ---
 
 # Modus Querens
@@ -50,8 +50,11 @@ or contested claims.
 Build or refresh `.modus-querens/index/`, reason over section trees, read source
 ranges on demand.
 
-On hosts with native codebase search (e.g. **Cursor**), use it during **Map** when
-it helps. Treat hits as **candidates** only; confirm by reading the section.
+Optional **BM25 lexical recall** (`build_bm25.py` + `search_bm25.py`, needs
+`rank-bm25`) covers multilingual notes (CJK, kana, Hangul, Thai, Cyrillic,
+Arabic, Devanagari, Greek, Hebrew, Latin). Native codebase search (e.g.
+**Cursor**) also belongs in **Map**. Treat hits as **candidates** only;
+confirm by reading the section.
 
 ## The loop
 
@@ -62,17 +65,53 @@ Frame  ->  Map  ->  Investigate  ->  Synthesize  ->  Audit (light)
 1. **Frame.** 2–5 probes + a sufficiency note → `plan.md`.
 2. **Map.** File-based index (+ optional native search). See [strategy-filebased.md](strategy-filebased.md).
 3. **Investigate.** One sub-agent per probe (parallel). Each reads sources, returns
-   findings, writes `<run>/investigations/<probe-slug>.md`.
-4. **Synthesize.** Merge sub-agent notes into a layered, cited answer.
+   findings, and **must write** `<run>/investigations/<probe-slug>.md` to disk.
+   **Before Synthesize:** confirm every probe file exists; if missing, re-dispatch
+   or write from the sub-agent return yourself.
+4. **Synthesize.** Merge investigation notes from disk into a layered, cited answer.
 5. **Audit.** Persist plan + investigation notes (+ optional `answer.md`).
 
 ## Sub-agents
 
 - Dispatch sub-agents in parallel, one per probe.
-- Give each: the probe, corpus root, index path, run folder.
-- Each **returns** a tight summary and **writes** an audit note.
-- You synthesize from the notes — do not re-read everything they read.
-- Use read-only sub-agents when the host supports them.
+- Give each: the probe, corpus root, index path, run folder, and **exact audit path**.
+- Each **returns** a tight summary and **writes** its audit note — both are required.
+- You synthesize from the on-disk notes — do not re-read everything they read.
+
+### Cursor (Task tool) — required settings
+
+Investigation sub-agents **must be able to write files**. Read-only sub-agents
+cannot complete Investigate; they will return markdown in chat but skip the audit
+trail.
+
+| Setting | Investigate phase | Why |
+| --- | --- | --- |
+| `readonly` | **`false`** (omit or explicit) | Must write `<run>/investigations/*.md` |
+| `subagent_type` | `generalPurpose` or `explore` | `explore` only if it can write in your harness |
+| `run_in_background` | parallel OK | One Task per probe |
+
+**Do not** set `readonly: true` for Investigate sub-agents. Reserve read-only
+agents for Map-only reconnaissance if needed — never for probe investigations.
+
+**Parent agent checklist** after Investigate returns:
+
+1. `Glob` or list `<run>/investigations/` — expect one file per probe.
+2. If any probe file is missing, **do not proceed to Synthesize** until fixed.
+3. Fix path: re-dispatch with `readonly: false` and the write path in the prompt,
+   or paste the sub-agent return into the missing file yourself, then continue.
+
+**Investigation prompt must include** (copy/adapt):
+
+```
+Write your audit note to this exact path (required, not optional):
+<run>/investigations/<probe-slug>.md
+
+Format: Summary, Evidence (cited bullets), Gaps.
+Do not finish until the file exists on disk.
+```
+
+Other hosts (Claude Code, Codex): same rule — sub-agents need write access to the
+run folder during Investigate.
 
 ## Output contract
 
@@ -95,6 +134,8 @@ Frame  ->  Map  ->  Investigate  ->  Synthesize  ->  Audit (light)
 .modus-querens/
 ├── index/
 │   ├── _catalog.json
+│   ├── _bm25_meta.json      # optional BM25 manifest
+│   ├── _bm25.pkl            # optional BM25 index
 │   └── <doc-slug>.json
 └── runs/
     └── <YYYYMMDD-HHMM>-<slug>/
@@ -110,4 +151,5 @@ Add `.modus-querens/` to `.gitignore` if you do not want runs tracked.
 
 - Full method and evidence discipline: [reference.md](reference.md).
 - File-based strategy: [strategy-filebased.md](strategy-filebased.md).
-- Index builder: `scripts/build_tree.py` (stdlib only; Markdown headings → trees).
+- Index builders: `scripts/build_tree.py` (stdlib; Markdown headings → trees),
+  `scripts/build_bm25.py` (optional `rank-bm25`; section-level lexical recall).
